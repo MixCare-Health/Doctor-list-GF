@@ -41,7 +41,12 @@ body{
 .results{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .card{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(16,24,40,0.04)}
 .card h3{margin:0;font-size:1rem}
-.meta{color:var(--muted);font-size:0.9rem}
+.card .card-title{font-size:1.05rem;margin-bottom:4px}
+.meta{color:var(--muted);font-size:0.95rem}
+
+/* Make address / phone / opening lines align visually with meta */
+.card-body .text-muted, .card-body small, .card-body div {font-size:0.95rem}
+.card-body .text-muted small {font-size:0.95rem}
 .row-sm{display:flex;justify-content:space-between;align-items:center;gap:12px}
 
 .actions{display:flex;gap:8px}

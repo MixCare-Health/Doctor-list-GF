@@ -1,43 +1,75 @@
 // Data will be loaded from data/doctors.json via fetch.
 let rawData = null;
-// Merge raw entries by doc_id into unified doctor objects with multilingual names
+// Group raw entries by doc_id+lang so each language-specific row becomes its own display item.
+// This avoids hiding language variants when multiple rows share the same doc_id.
 function mergeByDocId(data) {
+	// Merge rows by doc_id into one doctor object that holds per-language maps.
 	const map = new Map();
 	data.forEach(item => {
-		const id = item.doc_id;
+		const id = item.doc_id || '';
+		const lang = item.lang || 'en';
 		if (!map.has(id)) {
-				map.set(id, {
-					id,
-					names: {},
-					address: item.doc_address || "",
-					phones: {},
-					specialties: {},
-					openings: {},
-					areas: {},
-					districts: {},
-					cities: {},
-					lat: item.doc_lat || "",
-					lng: item.doc_long || "",
-					cta_link: item.cta_link || ""
-				});
+			map.set(id, {
+				id,
+				names: {},
+				addresses: {},
+				address: item.doc_address || "",
+				phones: {},
+				specialties: {},
+				openings: {},
+				remarks: {},
+				areas: {},
+				districts: {},
+				cities: {},
+				lat: item.doc_lat || "",
+				lng: item.doc_long || "",
+				cta_link: item.cta_link || ""
+			});
 		}
 		const doc = map.get(id);
-		// store name by language key
-		const lang = item.lang || "en";
-			doc.names[lang] = item.doc_name || doc.names[lang] || "";
-			// store localized specialty/opening/area/district/city
-			if (item.doc_cat_name) doc.specialties[lang] = item.doc_cat_name;
-			if (item.doc_wh) doc.openings[lang] = item.doc_wh;
-			if (item.area_name) doc.areas[lang] = item.area_name;
-			if (item.district_name) doc.districts[lang] = item.district_name;
-			if (item.city_name) doc.cities[lang] = item.city_name;
-			// store phone per-language optionally
-			if (item.doc_tel_A) doc.phones[lang] = item.doc_tel_A;
+		// populate per-language maps
+		doc.names[lang] = item.doc_name || doc.names[lang] || '';
+		if (item.doc_address) doc.addresses[lang] = item.doc_address;
+		if (item.doc_tel_A) doc.phones[lang] = item.doc_tel_A;
+		if (item.doc_cat_name) doc.specialties[lang] = item.doc_cat_name;
+		if (item.doc_wh) doc.openings[lang] = item.doc_wh;
+		if (item.doc_remark) doc.remarks[lang] = item.doc_remark;
+		if (item.area_name) doc.areas[lang] = item.area_name;
+		if (item.district_name) doc.districts[lang] = item.district_name;
+		if (item.city_name) doc.cities[lang] = item.city_name;
+		// keep lat/lng if not present yet
+		if (!doc.lat && item.doc_lat) doc.lat = item.doc_lat;
+		if (!doc.lng && item.doc_long) doc.lng = item.doc_long;
 	});
 	return Array.from(map.values());
 }
 
+// normalize per row: each JSON row becomes its own display item
+function normalizePerRow(data) {
+	return data.map((item, idx) => {
+		const lang = item.lang || 'en';
+		return {
+			id: `${item.doc_id || ''}_${lang}_${idx}`,
+			baseId: item.doc_id || '',
+			names: { [lang]: item.doc_name || '' },
+			addresses: { [lang]: item.doc_address || '' },
+			address: item.doc_address || '',
+			phones: { [lang]: item.doc_tel_A || '' },
+			specialties: { [lang]: item.doc_cat_name || '' },
+			openings: { [lang]: item.doc_wh || '' },
+			remarks: { [lang]: item.doc_remark || '' },
+			areas: { [lang]: item.area_name || '' },
+			districts: { [lang]: item.district_name || '' },
+			cities: { [lang]: item.city_name || '' },
+			lat: item.doc_lat || '',
+			lng: item.doc_long || '',
+			cta_link: item.cta_link || ''
+		};
+	});
+}
+
 let doctors = [];
+let showAllRecords = true;
 
 async function loadDoctors() {
 	// show loading
@@ -48,7 +80,8 @@ async function loadDoctors() {
 		const res = await fetch(dataUrl, { cache: 'no-store' });
 		if (!res.ok) throw new Error('Failed to load doctors.json: ' + res.status);
 		rawData = await res.json();
-		doctors = mergeByDocId(rawData);
+		// use showAllRecords flag to decide merge strategy
+		doctors = showAllRecords ? normalizePerRow(rawData) : mergeByDocId(rawData);
 
 		// detect language from URL (path first segment) or query param e.g. ?lang=zh-hk
 		let initialLang = 'en';
@@ -103,8 +136,11 @@ const translations = {
 		map: 'Map',
 		noDoctors: 'No doctors found.',
 		phoneLabel: 'Phone',
+		addressLabel: 'Address',
 		openingLabel: 'Opening',
-		doctorsCount: (n) => `${n} doctor${n>1? 's':' found'}`
+		remarkLabel: 'Remark',
+		doctorsCount: (n) => `${n} doctor${n>1? 's':' found'}`,
+		showAllRecords: 'Show all records'
 	},
 	'zh-HK': {
         brand: 'MixCare 網絡醫生名單',
@@ -118,8 +154,11 @@ const translations = {
 		map: '地圖',
 		noDoctors: '找不到醫生。',
 		phoneLabel: '電話',
+		addressLabel: '地址',
 		openingLabel: '診症時間',
-		doctorsCount: (n) => `共找到 ${n} 位醫生`
+		remarkLabel: '自付費及藥物:',
+		doctorsCount: (n) => `共找到 ${n} 位醫生`,
+		showAllRecords: '顯示所有紀錄'
 	}
 };
 
@@ -137,12 +176,14 @@ function tData(doc, field, lang){
 	// map of field -> plural key in doctor object
 	const plural = {
 		name: 'names',
+		address: 'addresses',
 		specialty: 'specialties',
 		opening: 'openings',
 		area: 'areas',
 		district: 'districts',
 		city: 'cities',
-		phone: 'phones'
+		phone: 'phones',
+		remark: 'remarks'
 	};
 	const key = plural[field] || (field + 's');
 	const map = doc[key] || {};
@@ -304,89 +345,106 @@ function renderDoctors(list) {
 	}
 	resultCountEl.textContent = t('doctorsCount', list.length);
 
+	// Render one card per doctor. Each card gets a small per-card language selector when multiple languages exist.
 	list.forEach(d => {
-		const lang = langSelect.value || 'en';
-		const name = d.names[lang] || d.names['en'] || Object.values(d.names)[0] || 'Unknown';
-		const spec = tData(d, 'specialty', lang) || '—';
-		const cityLabel = tData(d, 'city', lang) || d.city || '';
-		const districtLabel = tData(d, 'district', lang) || d.district || '';
-		const areaLabel = tData(d, 'area', lang) || d.area || '';
-		const phoneLabel = tData(d, 'phone', lang) || Object.values(d.phones || {})[0] || d.phone || '';
-		const openingLabel = tData(d, 'opening', lang) || Object.values(d.openings || {})[0] || d.opening || '';
+		const availableLangs = Object.keys(d.names || {});
+		// pick initial language: prefer global UI lang if present
+		const globalLang = (langSelect && langSelect.value) || 'en';
+		let cardLang = availableLangs.includes(globalLang) ? globalLang : (availableLangs[0] || globalLang);
 		const col = document.createElement('div'); col.className = 'col-md-12';
 		const card = document.createElement('div'); card.className = 'card h-100';
 		const body = document.createElement('div'); body.className = 'card-body d-flex flex-column';
 
-		const h = document.createElement('h5'); h.className = 'card-title'; h.textContent = name; body.appendChild(h);
-		const meta = document.createElement('div'); meta.className = 'meta mb-2';
-		meta.textContent = spec;
-		body.appendChild(meta);
+		// header row: name + per-card language select
+		const headerRow = document.createElement('div'); headerRow.className = 'd-flex align-items-start justify-content-between mb-2';
+		const h = document.createElement('h5'); h.className = 'card-title mb-0'; headerRow.appendChild(h);
 
-		// area / district / city line
-		const loc = document.createElement('div'); loc.className = 'text-muted mb-2'; loc.textContent = `${cityLabel || ''} • ${districtLabel || ''} • ${areaLabel || ''}`; body.appendChild(loc);
-
-		// phone on its own line
-		const phoneLine = document.createElement('div'); phoneLine.innerHTML = `<strong>${t('phoneLabel')}: </strong> <a href="tel:${formatPhoneForTel(phoneLabel)}">${phoneLabel||'—'}</a>`; body.appendChild(phoneLine);
-
-		// opening on its own line
-		const openLine = document.createElement('div'); openLine.className = 'mb-3'; openLine.innerHTML = `<strong>${t('openingLabel')}: </strong> ${openingLabel || '—'}`; body.appendChild(openLine);
-
-		const actions = document.createElement('div'); actions.className = 'mt-auto d-flex gap-2';
-		// Call button: use localized phoneLabel when available
-		if (phoneLabel) {
-			const callBtn = document.createElement('a');
-			callBtn.className = 'btn btn-primary btn-sm';
-			callBtn.href = `tel:${formatPhoneForTel(phoneLabel)}`;
-			callBtn.textContent = t('callToBook');
-			actions.appendChild(callBtn);
-		} else {
-			const callBtn = document.createElement('button');
-			callBtn.className = 'btn btn-secondary btn-sm disabled';
-			callBtn.type = 'button';
-			callBtn.textContent = t('callToBook');
-			callBtn.setAttribute('aria-disabled','true');
-			actions.appendChild(callBtn);
+		if (availableLangs.length > 1) {
+			const langSel = document.createElement('select');
+			langSel.className = 'form-select form-select-sm ms-2';
+			langSel.style.width = 'auto';
+			availableLangs.forEach(lc => {
+				const opt = document.createElement('option'); opt.value = lc; opt.textContent = langLabel(lc); langSel.appendChild(opt);
+			});
+			langSel.value = cardLang;
+			headerRow.appendChild(langSel);
+			// when user changes per-card language, update fields inside this card
+			langSel.addEventListener('change', (e) => {
+				cardLang = e.target.value;
+				renderCardFields();
+			});
 		}
+		body.appendChild(headerRow);
 
-		if (d.lat && d.lng){
-				// prefer searching by address when possible; otherwise use lat,lng
-				let addressQuery = d.address || '';
-				if (!addressQuery) {
-					// try assembling from localized labels
-					const lang = (langSelect && langSelect.value) || 'en';
-					const a = tData(d, 'area', lang) || d.area || '';
-					const di = tData(d, 'district', lang) || d.district || '';
-					const ci = tData(d, 'city', lang) || d.city || '';
-					addressQuery = [d.address, a, di, ci].filter(Boolean).join(' ').trim();
-				}
-				if (addressQuery) {
-					const mapBtn = document.createElement('a'); mapBtn.className = 'btn btn-outline-secondary btn-sm map-link';
-					mapBtn.target = '_blank';
-					mapBtn.rel = 'noopener';
-					// use maps.google.com with zoom (z=19 ~ street/building level ~50m)
-					mapBtn.href = `https://www.google.com/maps?&q=${encodeURIComponent(addressQuery)}&z=19`;
-					mapBtn.textContent = t('map');
-					actions.appendChild(mapBtn);
-				} else {
-					const mapBtn = document.createElement('a'); mapBtn.className = 'btn btn-outline-secondary btn-sm map-link';
-					mapBtn.target = '_blank';
-					mapBtn.rel = 'noopener';
-					// center on lat,lng with zoom 19
-					mapBtn.href = `https://www.google.com/maps/@${encodeURIComponent(d.lat)},${encodeURIComponent(d.lng)},19z`;
-					mapBtn.textContent = t('map');
-					actions.appendChild(mapBtn);
-				}
-		} else if (d.address) {
-				const mapBtn = document.createElement('a'); mapBtn.className = 'btn btn-outline-secondary btn-sm map-link';
-				mapBtn.target = '_blank'; mapBtn.rel='noopener';
-				mapBtn.href = `https://www.google.com/maps?&q=${encodeURIComponent(d.address)}&z=19`;
-				mapBtn.textContent = t('map'); actions.appendChild(mapBtn);
-		}
+		const meta = document.createElement('div'); meta.className = 'meta mb-2'; body.appendChild(meta);
+		const loc = document.createElement('div'); loc.className = 'text-muted mb-2'; body.appendChild(loc);
+		const addressLine = document.createElement('div'); addressLine.className = 'mb-2 text-break'; body.appendChild(addressLine);
+		const phoneLine = document.createElement('div'); body.appendChild(phoneLine);
+		const openLine = document.createElement('div'); openLine.className = 'mb-3'; body.appendChild(openLine);
+		const remarkLine = document.createElement('div'); remarkLine.className = 'mb-3'; body.appendChild(remarkLine);
+		const actions = document.createElement('div'); actions.className = 'mt-auto d-flex gap-2 justify-content-end'; body.appendChild(actions);
 
-		body.appendChild(actions);
 		card.appendChild(body);
 		col.appendChild(card);
 		resultsEl.appendChild(col);
+
+		// function that renders text & actions for the chosen language for this card
+		function renderCardFields(){
+			const name = tData(d, 'name', cardLang) || tData(d, 'name', 'en') || Object.values(d.names || {})[0] || 'Unknown';
+			const spec = tData(d, 'specialty', cardLang) || '—';
+			const cityLabel = tData(d, 'city', cardLang) || '';
+			const districtLabel = tData(d, 'district', cardLang) || '';
+			const areaLabel = tData(d, 'area', cardLang) || '';
+			const addressText = tData(d, 'address', cardLang) || d.address || '';
+			const phoneLabel = tData(d, 'phone', cardLang) || Object.values(d.phones || {})[0] || '';
+			const openingLabel = tData(d, 'opening', cardLang) || Object.values(d.openings || {})[0] || '';
+			const remarkText = tData(d, 'remark', cardLang) || Object.values(d.remarks || {})[0] || '';
+
+			// update DOM
+			h.textContent = name;
+			meta.textContent = spec;
+			loc.textContent = `${cityLabel || ''} • ${districtLabel || ''} • ${areaLabel || ''}`;
+			if (addressText) addressLine.innerHTML = `<strong>${t('addressLabel')}: </strong><small class="text-muted">${addressText}</small>`;
+			else addressLine.innerHTML = `<strong>${t('addressLabel')}: </strong><small class="text-muted">—</small>`;
+			phoneLine.innerHTML = `<strong>${t('phoneLabel')}: </strong> ${phoneLabel ? `<a href="tel:${formatPhoneForTel(phoneLabel)}">${phoneLabel}</a>` : '—'}`;
+			openLine.innerHTML = `<strong>${t('openingLabel')}: </strong> ${openingLabel || '—'}`;
+			remarkLine.innerHTML = `<strong>${t('remarkLabel')}: </strong> ${remarkText || '—'}`;
+
+			// rebuild actions
+			actions.innerHTML = '';
+			if (phoneLabel) {
+				const callBtn = document.createElement('a'); callBtn.className = 'btn btn-primary btn-sm'; callBtn.href = `tel:${formatPhoneForTel(phoneLabel)}`; callBtn.textContent = t('callToBook'); actions.appendChild(callBtn);
+			} else {
+				const callBtn = document.createElement('button'); callBtn.className = 'btn btn-secondary btn-sm disabled'; callBtn.type = 'button'; callBtn.textContent = t('callToBook'); callBtn.setAttribute('aria-disabled','true'); actions.appendChild(callBtn);
+			}
+
+			// map button prefers localized address if available
+			let addressQuery = addressText || '';
+			if (!addressQuery) {
+				addressQuery = [d.address, areaLabel, districtLabel, cityLabel].filter(Boolean).join(' ').trim();
+			}
+			if (addressQuery) {
+				const mapBtn = document.createElement('a'); mapBtn.className = 'btn btn-outline-secondary btn-sm map-link'; mapBtn.target = '_blank'; mapBtn.rel='noopener'; mapBtn.href = `https://www.google.com/maps?&q=${encodeURIComponent(addressQuery)}&z=19`; mapBtn.textContent = t('map'); actions.appendChild(mapBtn);
+			} else if (d.lat && d.lng) {
+				const mapBtn = document.createElement('a'); mapBtn.className = 'btn btn-outline-secondary btn-sm map-link'; mapBtn.target = '_blank'; mapBtn.rel='noopener'; mapBtn.href = `https://www.google.com/maps/@${encodeURIComponent(d.lat)},${encodeURIComponent(d.lng)},19z`; mapBtn.textContent = t('map'); actions.appendChild(mapBtn);
+			}
+		}
+
+		// initial render
+		renderCardFields();
+
+		// helper to display nice labels for language codes
+		function langLabel(code){
+			switch((code||'').toLowerCase()){
+				case 'en': return 'EN';
+				case 'zh-hk': return '中文 (繁)';
+				case 'zh-cn': return '中文 (简)';
+				case 'zh-hant': return '中文 (繁)';
+				case 'zh': return '中文';
+				default: return code;
+			}
+		}
+
 	});
 }
 
@@ -397,20 +455,32 @@ function applyFilters() {
 	const district = districtSelect.value;
 	const area = areaSelect.value;
 
+	// Improved filtering: compare selected filter values against any available localized value for the doctor
 	const filtered = doctors.filter(d => {
 		// name search across all languages
-			const allNames = Object.values(d.names).join(' ').toLowerCase();
-			if (q && !allNames.includes(q)) return false;
-			// compare using localized data
-			const lang = (langSelect && langSelect.value) || 'en';
-			const docSpec = tData(d, 'specialty', lang) || '';
-			const docCity = tData(d, 'city', lang) || '';
-			const docDistrict = tData(d, 'district', lang) || '';
-			const docArea = tData(d, 'area', lang) || '';
-			if (specialty && docSpec !== specialty) return false;
-			if (city && docCity !== city) return false;
-			if (district && docDistrict !== district) return false;
-			if (area && docArea !== area) return false;
+		const allNames = Object.values(d.names || {}).join(' ').toLowerCase();
+		if (q && !allNames.includes(q)) return false;
+
+		// Specialty: match against any language variant stored in d.specialties
+		if (specialty) {
+			const specs = Object.values(d.specialties || {}).map(s => (s||'').toString().toLowerCase());
+			if (!specs.some(s => s === specialty.toLowerCase())) return false;
+		}
+
+		// City / District / Area: match against any localized variant
+		if (city) {
+			const cities = Object.values(d.cities || {}).map(x => (x||'').toString().toLowerCase());
+			if (!cities.some(c => c === city.toLowerCase())) return false;
+		}
+		if (district) {
+			const districts = Object.values(d.districts || {}).map(x => (x||'').toString().toLowerCase());
+			if (!districts.some(c => c === district.toLowerCase())) return false;
+		}
+		if (area) {
+			const areas = Object.values(d.areas || {}).map(x => (x||'').toString().toLowerCase());
+			if (!areas.some(c => c === area.toLowerCase())) return false;
+		}
+
 		return true;
 	});
 
